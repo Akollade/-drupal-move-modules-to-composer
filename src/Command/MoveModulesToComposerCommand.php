@@ -8,6 +8,8 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 use Symfony\Component\Process\Process;
 use Symfony\Component\Process\Exception\ProcessFailedException;
@@ -16,6 +18,16 @@ class MoveModulesToComposerCommand extends Command
 {
     protected static $defaultName = 'app:move-modules-to-composer';
     protected static $defaultDescription = 'Add a short description for your command';
+
+    /**
+     * @var string
+     */
+    private $projectPath;
+
+    /**
+     * @var string|null
+     */
+    private $siteUri;
 
     protected function configure(): void
     {
@@ -31,16 +43,20 @@ class MoveModulesToComposerCommand extends Command
 
         $io->title('Move modules to composer');
 
-        $projectPath = $input->getArgument('project-path');
-        $siteUri = $input->getOption('site-uri');
+        $this->projectPath = rtrim($input->getArgument('project-path'), '/');
+        $this->siteUri = $input->getOption('site-uri');
 
-        $modulesPath = sprintf('%s/sites/all/modules', $projectPath);
+        $modulesPath = sprintf('%s/sites/all/modules', $this->projectPath);
 
         $modulesDirectories = glob(sprintf("%s/*", $modulesPath), GLOB_ONLYDIR);
         $io->note(sprintf('Found %d modules', count($modulesDirectories)));
 
+        $filesystem = new Filesystem();
+
         foreach ($modulesDirectories as $moduleDirectory) {
             $moduleName = basename($moduleDirectory);
+            $modulePathFromRoot = str_replace($this->projectPath . '/', '', $moduleDirectory);
+
             $io->section(sprintf('Module %s', $moduleName));
 
             $moduleInfo = file_get_contents(sprintf("%s/%s/%s.info.yml", $modulesPath, $moduleName, $moduleName));
@@ -67,8 +83,8 @@ class MoveModulesToComposerCommand extends Command
                 ['Composer version' => $moduleComposerVersion],
             );
 
-            $isAlreadyInstalledWithComposer = $this->checkIfAlreadyInstalledWithComposer($projectPath, $moduleName);
-            $moduleInfoFromDrush = $this->getModuleInfoFromDrush($projectPath, $moduleName, $siteUri);
+            $isAlreadyInstalledWithComposer = $this->checkIfAlreadyInstalledWithComposer($moduleName);
+            $moduleInfoFromDrush = $this->getModuleInfoFromDrush($moduleName);
             $moduleNotActivated = 'not installed' === $moduleInfoFromDrush['status'];
 
             if ($isAlreadyInstalledWithComposer) {
@@ -76,14 +92,41 @@ class MoveModulesToComposerCommand extends Command
             }
 
             if ($moduleNotActivated) {
-                $io->warning('The module is not activated, you can remove it');
+                $io->warning('The module is not activated');
+            }
+
+            if ($io->confirm(sprintf('Do you want to delete %s ?', $modulePathFromRoot))) {
+                $filesystem->remove($moduleDirectory);
+                $this->commitChanges(
+                    sprintf(':fire: Remove %s', $modulePathFromRoot),
+                    $modulePathFromRoot
+                );
+            }
+
+            if ($moduleNotActivated) {
+                if ($isAlreadyInstalledWithComposer && $io->confirm('Do you want to uninstall it with composer ?')) {
+                    $this->uninstallModuleWithComposer($moduleName);
+                    $this->commitChanges(
+                        sprintf(':fire: Uninstall %s', $moduleName),
+                        'composer.*'
+                    );
+                }
+
+                continue;
             }
 
             $io->comment(sprintf(
-                'Command to install the module with composer: composer require drupal/%s:%s',
-                $moduleName,
+                'Command to install the module with composer: composer require %s:%s',
+                $this->getComposerPackageName($moduleName),
                 $moduleComposerVersion
             ));
+            if ($io->confirm('Do you want to install the module with composer ?')) {
+                $this->installModuleWithComposer($moduleName, $moduleComposerVersion);
+                $this->commitChanges(
+                    sprintf('Install %s:%s', $this->getComposerPackageName($moduleName), $moduleComposerVersion),
+                    'composer.*'
+                );
+            }
         }
 
         return Command::SUCCESS;
@@ -104,15 +147,15 @@ class MoveModulesToComposerCommand extends Command
         return $version;
     }
 
-    private function checkIfAlreadyInstalledWithComposer(string $projectPath, string $moduleName): bool
+    private function checkIfAlreadyInstalledWithComposer(string $moduleName): bool
     {
-        $composerJson = file_get_contents(sprintf('%s/composer.json', $projectPath));
+        $composerJson = file_get_contents(sprintf('%s/composer.json', $this->projectPath));
         $composerData = json_decode($composerJson, true);
 
-        return array_key_exists('drupal/' . $moduleName, $composerData['require']);
+        return array_key_exists($this->getComposerPackageName($moduleName), $composerData['require']);
     }
 
-    private function getModuleInfoFromDrush(string $projectPath, string $moduleName, ?string $siteUri): array
+    private function getModuleInfoFromDrush(string $moduleName): array
     {
         $command = [
             'drush',
@@ -120,11 +163,11 @@ class MoveModulesToComposerCommand extends Command
             $moduleName,
             '--format=json',
         ];
-        if ($siteUri) {
-            $command[] = sprintf('--uri=%s', $siteUri);
+        if ($this->siteUri) {
+            $command[] = sprintf('--uri=%s', $this->siteUri);
         }
 
-        $process = new Process($command, $projectPath);
+        $process = new Process($command, $this->projectPath);
 
         try {
             $process->mustRun();
@@ -137,5 +180,56 @@ class MoveModulesToComposerCommand extends Command
         }
 
         return json_decode($process->getOutput(), true)[$moduleName];
+    }
+
+    private function installModuleWithComposer(string $moduleName, string $version)
+    {
+        $command = [
+            'composer',
+            'require',
+            sprintf('%s:%s', $this->getComposerPackageName($moduleName), $version),
+        ];
+
+        $process = new Process($command, $this->projectPath);
+        $process->mustRun();
+    }
+
+    private function uninstallModuleWithComposer(string $moduleName)
+    {
+        $command = [
+            'composer',
+            'remove',
+            $this->getComposerPackageName($moduleName),
+        ];
+
+        $process = new Process($command, $this->projectPath);
+        $process->mustRun();
+    }
+
+    private function getComposerPackageName(string $moduleName): string
+    {
+        return sprintf('drupal/%s', $moduleName);
+    }
+
+    private function commitChanges(string $message, string ...$paths)
+    {
+        $commands = [
+            [
+                'git',
+                'add',
+                implode(' ', $paths),
+            ],
+            [
+                'git',
+                'commit',
+                '-m',
+                $message
+            ]
+        ];
+
+        foreach($commands as $command) {
+            $process = new Process($command, $this->projectPath);
+            $process->mustRun();
+        }
     }
 }
