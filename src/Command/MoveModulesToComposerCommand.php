@@ -101,32 +101,32 @@ class MoveModulesToComposerCommand extends Command
                     sprintf(':fire: Remove %s', $modulePathFromRoot),
                     $modulePathFromRoot
                 );
+                $io->note(sprintf('The module %s has been removed', $modulePathFromRoot));
             }
 
-            if ($moduleNotActivated) {
-                if ($isAlreadyInstalledWithComposer && $io->confirm('Do you want to uninstall it with composer ?')) {
+            if ($isAlreadyInstalledWithComposer) {
+                if ($moduleNotActivated && $io->confirm('Do you want to uninstall it with composer ?')) {
                     $this->uninstallModuleWithComposer($moduleName);
                     $this->commitChanges(
                         sprintf(':fire: Uninstall %s', $moduleName),
-                        'composer.*'
+                        'composer.*',
+                        'libraries/*',
                     );
+                    $io->note(sprintf('The module %s has been uninstalled', $moduleName));
                 }
-
-                continue;
             }
-
-            $io->comment(sprintf(
-                'Command to install the module with composer: composer require %s:%s',
-                $this->getComposerPackageName($moduleName),
-                $moduleComposerVersion
-            ));
-            if ($io->confirm('Do you want to install the module with composer ?')) {
+            else if (!$moduleNotActivated && $io->confirm('Do you want to install the module with composer ?')) {
                 $this->installModuleWithComposer($moduleName, $moduleComposerVersion);
                 $this->commitChanges(
                     sprintf('Install %s:%s', $this->getComposerPackageName($moduleName), $moduleComposerVersion),
-                    'composer.*'
+                    'composer.*',
+                    'libraries/*',
                 );
+                $io->note(sprintf('The module %s:%s has been installed', $this->getComposerPackageName($moduleName), $moduleComposerVersion));
             }
+
+            // Rebuild cache to check if everything is ok
+            $this->clearDrupalCache();
         }
 
         return Command::SUCCESS;
@@ -182,7 +182,7 @@ class MoveModulesToComposerCommand extends Command
         return json_decode($process->getOutput(), true)[$moduleName];
     }
 
-    private function installModuleWithComposer(string $moduleName, string $version)
+    private function installModuleWithComposer(string $moduleName, string $version): void
     {
         $command = [
             'composer',
@@ -194,7 +194,7 @@ class MoveModulesToComposerCommand extends Command
         $process->mustRun();
     }
 
-    private function uninstallModuleWithComposer(string $moduleName)
+    private function uninstallModuleWithComposer(string $moduleName): void
     {
         $command = [
             'composer',
@@ -211,14 +211,27 @@ class MoveModulesToComposerCommand extends Command
         return sprintf('drupal/%s', $moduleName);
     }
 
-    private function commitChanges(string $message, string ...$paths)
+    private function clearDrupalCache(): void
+    {
+        $command = [
+            'drush',
+            'cache:rebuild',
+        ];
+        if ($this->siteUri) {
+            $command[] = sprintf('--uri=%s', $this->siteUri);
+        }
+
+        $process = new Process($command, $this->projectPath);
+        $process->mustRun();
+    }
+
+    private function commitChanges(string $message, string ...$paths): void
     {
         $commands = [
-            [
+            array_merge([
                 'git',
                 'add',
-                implode(' ', $paths),
-            ],
+            ], $paths),
             [
                 'git',
                 'commit',
