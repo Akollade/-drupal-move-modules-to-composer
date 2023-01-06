@@ -27,6 +27,11 @@ class MoveModulesToComposerCommand extends Command
     /**
      * @var string|null
      */
+    private $webPath;
+
+    /**
+     * @var string|null
+     */
     private $siteUri;
 
     protected function configure(): void
@@ -34,6 +39,7 @@ class MoveModulesToComposerCommand extends Command
         $this
             ->addArgument('project-path', InputArgument::OPTIONAL, 'Drupal project path')
             ->addOption('site-uri', null, InputOption::VALUE_REQUIRED, 'Site URI if the project is a multisite')
+            ->addOption('web-root', null, InputOption::VALUE_REQUIRED, 'Web root path', '')
         ;
     }
 
@@ -44,9 +50,10 @@ class MoveModulesToComposerCommand extends Command
         $io->title('Move modules to composer');
 
         $this->projectPath = rtrim($input->getArgument('project-path'), '/');
+        $this->webPath = sprintf('%s/%s', $this->projectPath, $input->getOption('web-root'));
         $this->siteUri = $input->getOption('site-uri');
 
-        $modulesPath = sprintf('%s/sites/all/modules', $this->projectPath);
+        $modulesPath = sprintf('%s/sites/all/modules', $this->webPath);
 
         $modulesDirectories = glob(sprintf("%s/*", $modulesPath), GLOB_ONLYDIR);
         $io->note(sprintf('Found %d modules', count($modulesDirectories)));
@@ -85,7 +92,7 @@ class MoveModulesToComposerCommand extends Command
 
             $isAlreadyInstalledWithComposer = $this->checkIfAlreadyInstalledWithComposer($moduleName);
             $moduleInfoFromDrush = $this->getModuleInfoFromDrush($moduleName);
-            $moduleNotActivated = 'not installed' === $moduleInfoFromDrush['status'];
+            $moduleNotActivated = 'Disabled' === $moduleInfoFromDrush['status'];
 
             if ($isAlreadyInstalledWithComposer) {
                 $io->warning(sprintf('The module is already required with Composer (version %s)', $moduleInfoFromDrush['version']));
@@ -109,8 +116,8 @@ class MoveModulesToComposerCommand extends Command
                     $this->uninstallModuleWithComposer($moduleName);
                     $this->commitChanges(
                         sprintf(':fire: Uninstall %s', $moduleName),
-                        'composer.*',
-                        'libraries/*',
+                        sprintf('%s/composer.*', $this->projectPath),
+                        sprintf('%s/libraries/*', $this->webPath),
                     );
                     $io->note(sprintf('The module %s has been uninstalled', $moduleName));
                 }
@@ -119,8 +126,8 @@ class MoveModulesToComposerCommand extends Command
                 $this->installModuleWithComposer($moduleName, $moduleComposerVersion);
                 $this->commitChanges(
                     sprintf('Install %s:%s', $this->getComposerPackageName($moduleName), $moduleComposerVersion),
-                    'composer.*',
-                    'libraries/*',
+                    sprintf('%s/composer.*', $this->projectPath),
+                    sprintf('%s/libraries/*', $this->webPath),
                 );
                 $io->note(sprintf('The module %s:%s has been installed', $this->getComposerPackageName($moduleName), $moduleComposerVersion));
             }
@@ -159,8 +166,8 @@ class MoveModulesToComposerCommand extends Command
     {
         $command = [
             'drush',
-            'pm-info',
-            $moduleName,
+            'pm-list',
+            sprintf('--filter=%s', $moduleName),
             '--format=json',
         ];
         if ($this->siteUri) {
