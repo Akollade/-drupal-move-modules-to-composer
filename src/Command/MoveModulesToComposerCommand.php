@@ -220,15 +220,19 @@ class MoveModulesToComposerCommand extends Command
 
     private function clearDrupalCache(): void
     {
-        $command = [
-            'drush',
-            'cache:rebuild',
-        ];
+        $drushCommand = 'drush';
         if ($this->siteUri) {
-            $command[] = sprintf('--uri=%s', $this->siteUri);
+            $drushCommand .= sprintf(' --uri=%s', $this->siteUri);
         }
 
-        $process = new Process($command, $this->projectPath);
+        $command = sprintf(
+            "echo \"SHOW TABLES LIKE 'cache%%'\" | $(%s sql-connect) | tail -n +2 | xargs -L1 -I%% echo \"TRUNCATE TABLE %%;\" | $(%s sql-connect) -v && %s cr",
+            $drushCommand,
+            $drushCommand,
+            $drushCommand
+        );
+
+        $process = Process::fromShellCommandline($command, $this->projectPath);
         $process->mustRun();
     }
 
