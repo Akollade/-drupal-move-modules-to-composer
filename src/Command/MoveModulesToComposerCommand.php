@@ -226,7 +226,7 @@ class MoveModulesToComposerCommand extends Command
         }
 
         $command = sprintf(
-            "echo \"SHOW TABLES LIKE 'cache%%'\" | $(%s sql-connect) | tail -n +2 | xargs -L1 -I%% echo \"TRUNCATE TABLE %%;\" | $(%s sql-connect) -v && %s cr",
+            "%s sql-query \"SHOW TABLES LIKE 'cache%%'\" | xargs -L1 -I%% echo \"TRUNCATE TABLE %%;\" | $(%s sql-connect) -v && %s cr",
             $drushCommand,
             $drushCommand,
             $drushCommand
