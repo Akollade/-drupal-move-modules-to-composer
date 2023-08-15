@@ -1,0 +1,14 @@
+#!/usr/bin/env php
+<?php
+require __DIR__.'/../vendor/autoload.php';
+
+use App\Command\MoveModulesToComposerCommand;
+use Symfony\Component\Console\Application;
+
+$application = new Application('echo', '1.0.0');
+$command = new MoveModulesToComposerCommand();
+
+$application->add($command);
+
+$application->setDefaultCommand($command->getName(), true);
+$application->run();

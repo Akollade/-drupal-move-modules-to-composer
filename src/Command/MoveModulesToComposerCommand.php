@@ -17,7 +17,7 @@ use Symfony\Component\Process\Exception\ProcessFailedException;
 class MoveModulesToComposerCommand extends Command
 {
     protected static $defaultName = 'app:move-modules-to-composer';
-    protected static $defaultDescription = 'Add a short description for your command';
+    protected static $defaultDescription = 'Move modules from sites/all/modules to composer';
 
     /**
      * @var string
