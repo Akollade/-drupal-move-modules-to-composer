@@ -50,7 +50,7 @@ class MoveModulesToComposerCommand extends Command
         $io->title('Move modules to composer');
 
         $this->projectPath = rtrim($input->getArgument('project-path'), '/');
-        $this->webPath = sprintf('%s/%s', $this->projectPath, $input->getOption('web-root'));
+        $this->webPath = rtrim(sprintf('%s/%s', $this->projectPath, $input->getOption('web-root')), '/');
         $this->siteUri = $input->getOption('site-uri');
 
         $modulesPath = sprintf('%s/sites/all/modules', $this->webPath);
